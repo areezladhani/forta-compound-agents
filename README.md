@@ -53,10 +53,8 @@
 
     - To track when a new pause guardian is elected.
       - we can track the new pause guardian event 
-      
-    - To track when a pause gloabl is executed.
+    - To track when a pause global is executed.
       - we can track the pause global event. 
-      
     - To track when a pause market is executed.
       - we can track the new pause market event 
      
