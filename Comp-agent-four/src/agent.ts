@@ -1,83 +1,83 @@
+import { providers } from "ethers";
 import {
-  BlockEvent,
   Finding,
-  Initialize,
-  HandleBlock,
   HandleTransaction,
-  HandleAlert,
-  AlertEvent,
   TransactionEvent,
-  FindingSeverity,
-  FindingType,
+  getEthersProvider,
 } from "forta-agent";
+import {
+  COMP_CONTRACT,
+  SUPPLY_BASE_EVENT,
+  SUPPLY_COLLATERAL_EVENT,
+  WITHDRAW_BASE_EVENT,
+  WITHDRAW_COLLATERAL_EVENT,
+} from "./constants";
+import { baseAsset, collateralAsset } from "./helper";
 
-export const ERC20_TRANSFER_EVENT =
-  "event Transfer(address indexed from, address indexed to, uint256 value)";
-export const TETHER_ADDRESS = "0xdAC17F958D2ee523a2206206994597C13D831ec7";
-export const TETHER_DECIMALS = 6;
-let findingsCount = 0;
+export function provideHandleTransaction(
+  provider: providers.Provider
+): HandleTransaction {
+  return async (txEvent: TransactionEvent): Promise<Finding[]> => {
+    const findings: Finding[] = [];
 
-const handleTransaction: HandleTransaction = async (
-  txEvent: TransactionEvent
-) => {
-  const findings: Finding[] = [];
+    //There are two supply events we will track
+    // supply base
+    // supply collateral
+    //There are two withdraw events we will track
+    // withdraw base
+    // withdraw collateral
 
-  // limiting this agent to emit only 5 findings so that the alert feed is not spammed
-  if (findingsCount >= 5) return findings;
+    const compEvents = txEvent.filterLog(
+      [
+        SUPPLY_BASE_EVENT,
+        SUPPLY_COLLATERAL_EVENT,
+        WITHDRAW_COLLATERAL_EVENT,
+        WITHDRAW_BASE_EVENT,
+      ],
+      COMP_CONTRACT
+    );
 
-  // filter the transaction logs for Tether transfer events
-  const tetherTransferEvents = txEvent.filterLog(
-    ERC20_TRANSFER_EVENT,
-    TETHER_ADDRESS
-  );
-
-  tetherTransferEvents.forEach((transferEvent) => {
-    // extract transfer event arguments
-    const { to, from, value } = transferEvent.args;
-    // shift decimals of transfer value
-    const normalizedValue = value.div(10 ** TETHER_DECIMALS);
-
-    // if more than 10,000 Tether were transferred, report it
-    if (normalizedValue.gt(10000)) {
-      findings.push(
-        Finding.fromObject({
-          name: "High Tether Transfer",
-          description: `High amount of USDT transferred: ${normalizedValue}`,
-          alertId: "FORTA-1",
-          severity: FindingSeverity.Low,
-          type: FindingType.Info,
-          metadata: {
-            to,
-            from,
-          },
-        })
-      );
-      findingsCount++;
+    for (const event of compEvents) {
+      if (event.name == "Supply") {
+        const { from, dst, amount } = event.args;
+        baseAsset(amount, event.name, from, dst, findings);
+      }
+      if (event.name == "SupplyCollateral") {
+        const { from, dst, asset, amount } = event.args;
+        await collateralAsset(
+          provider,
+          txEvent.blockNumber,
+          event.name,
+          asset,
+          amount,
+          from,
+          dst,
+          findings
+        );
+      }
+      //These are the two borrow cases
+      if (event.name == "Withdraw") {
+        const { src, to, amount } = event.args;
+        baseAsset(amount, event.name, src, to, findings);
+      }
+      if (event.name == "WithdrawCollateral") {
+        const { src, to, asset, amount } = event.args;
+        await collateralAsset(
+          provider,
+          txEvent.blockNumber,
+          event.name,
+          asset,
+          amount,
+          src,
+          to,
+          findings
+        );
+      }
     }
-  });
-
-  return findings;
-};
-
-// const initialize: Initialize = async () => {
-//   // do some initialization on startup e.g. fetch data
-// }
-
-// const handleBlock: HandleBlock = async (blockEvent: BlockEvent) => {
-//   const findings: Finding[] = [];
-//   // detect some block condition
-//   return findings;
-// }
-
-// const handleAlert: HandleAlert = async (alertEvent: AlertEvent) => {
-//   const findings: Finding[] = [];
-//   // detect some alert condition
-//   return findings;
-// }
+    return findings;
+  };
+}
 
 export default {
-  // initialize,
-  handleTransaction,
-  // handleBlock,
-  // handleAlert
+  handleTransaction: provideHandleTransaction(getEthersProvider()),
 };

@@ -1,74 +1,205 @@
 import {
-  FindingType,
-  FindingSeverity,
-  Finding,
-  HandleTransaction,
-  createTransactionEvent,
-  ethers,
-} from "forta-agent";
-import agent, {
-  ERC20_TRANSFER_EVENT,
-  TETHER_ADDRESS,
-  TETHER_DECIMALS,
-} from "./agent";
+  MockEthersProvider,
+  TestTransactionEvent,
+} from "forta-agent-tools/lib/test";
+import { ethers, HandleTransaction } from "forta-agent";
+import { provideHandleTransaction } from "./agent";
+import { Interface } from "ethers/lib/utils";
+import {
+  AbsorbCollParams,
+  ABSORB_COLLATERAL_EVENT,
+  assetInfoBTC,
+  assetInfoETH,
+  buyCollParamsBTC,
+  buyCollParamsBTCFormatted,
+  buyCollParamsETH,
+  buyCollParamsETHFormatted,
+  buyCollParamsFailETH,
+  BUY_COLLATERAL_EVENT,
+  COMP_CONTRACT,
+  WBTC,
+  WETH,
+} from "./constants";
+import { createAddress } from "forta-agent-tools";
+import { createNewCollateralBuyFinding } from "./findings";
+import "./cometAbi";
+import { COMET_ABI } from "./cometAbi";
 
-describe("high tether transfer agent", () => {
+const interface_info = new ethers.utils.Interface(COMET_ABI);
+
+const randAddr: string = createAddress("0x11");
+
+// helper function that simulates a function call from a certain contract
+// E.G for token0 function in pool contract we return the token address when called with correct params
+const MakeMockCall = (
+  mockProvider: MockEthersProvider,
+  id: string,
+  inp: any[],
+  outp: any[],
+  addr: string,
+  intface: Interface,
+  block: number = 10
+) => {
+  mockProvider.addCallTo(addr, block, intface, id, {
+    inputs: inp,
+    outputs: outp,
+  });
+};
+
+describe("Liquidation buys Compound protocol", () => {
   let handleTransaction: HandleTransaction;
-  const mockTxEvent = createTransactionEvent({} as any);
+  let mockProvider: MockEthersProvider;
+  let provider: ethers.providers.Provider;
 
-  beforeAll(() => {
-    handleTransaction = agent.handleTransaction;
+  beforeEach(() => {
+    mockProvider = new MockEthersProvider();
+    provider = mockProvider as unknown as ethers.providers.Provider;
+    handleTransaction = provideHandleTransaction(provider);
   });
 
-  describe("handleTransaction", () => {
-    it("returns empty findings if there are no Tether transfers", async () => {
-      mockTxEvent.filterLog = jest.fn().mockReturnValue([]);
+  it("returns an empty finding if there are no valid events", async () => {
+    const txEvent = new TestTransactionEvent();
+    const findings = await handleTransaction(txEvent);
+    expect(findings.length).toEqual(0);
+    expect(findings).toStrictEqual([]);
+  });
 
-      const findings = await handleTransaction(mockTxEvent);
+  it("returns an empty finding if there is a valid event but from the incorrect address", async () => {
+    const txEvent = new TestTransactionEvent().addEventLog(
+      BUY_COLLATERAL_EVENT,
+      randAddr,
+      [
+        buyCollParamsETH.buyer,
+        buyCollParamsETH.asset,
+        buyCollParamsETH.baseAmount,
+        buyCollParamsETH.collateralAmount,
+      ]
+    );
+    const findings = await handleTransaction(txEvent);
+    expect(findings.length).toEqual(0);
+    expect(findings).toStrictEqual([]);
+  });
 
-      expect(findings).toStrictEqual([]);
-      expect(mockTxEvent.filterLog).toHaveBeenCalledTimes(1);
-      expect(mockTxEvent.filterLog).toHaveBeenCalledWith(
-        ERC20_TRANSFER_EVENT,
-        TETHER_ADDRESS
-      );
-    });
+  it("returns an empty finding if there is a invalid event from the correct address", async () => {
+    const txEvent = new TestTransactionEvent().addEventLog(
+      ABSORB_COLLATERAL_EVENT,
+      randAddr,
+      [
+        AbsorbCollParams.absorber,
+        AbsorbCollParams.borrower,
+        AbsorbCollParams.asset,
+        AbsorbCollParams.collateralAbsorbed,
+        AbsorbCollParams.usdValue,
+      ]
+    );
+    const findings = await handleTransaction(txEvent);
+    expect(findings.length).toEqual(0);
+    expect(findings).toStrictEqual([]);
+  });
 
-    it("returns a finding if there is a Tether transfer over 10,000", async () => {
-      const mockTetherTransferEvent = {
-        args: {
-          from: "0xabc",
-          to: "0xdef",
-          value: ethers.BigNumber.from("20000000000"), //20k with 6 decimals
-        },
-      };
-      mockTxEvent.filterLog = jest
-        .fn()
-        .mockReturnValue([mockTetherTransferEvent]);
+  it("returns no finding if there is a valid event from the correct address but base amount is under 10,000", async () => {
+    MakeMockCall(
+      mockProvider,
+      "getAssetInfoByAddress",
+      [WETH],
+      [assetInfoETH],
+      COMP_CONTRACT,
+      interface_info
+    );
 
-      const findings = await handleTransaction(mockTxEvent);
+    const txEvent = new TestTransactionEvent()
+      .addEventLog(BUY_COLLATERAL_EVENT, COMP_CONTRACT, [
+        buyCollParamsFailETH.buyer,
+        buyCollParamsFailETH.asset,
+        buyCollParamsFailETH.baseAmount,
+        buyCollParamsFailETH.collateralAmount,
+      ])
+      .setBlock(10);
+    const findings = await handleTransaction(txEvent);
 
-      const normalizedValue = mockTetherTransferEvent.args.value.div(
-        10 ** TETHER_DECIMALS
-      );
-      expect(findings).toStrictEqual([
-        Finding.fromObject({
-          name: "High Tether Transfer",
-          description: `High amount of USDT transferred: ${normalizedValue}`,
-          alertId: "FORTA-1",
-          severity: FindingSeverity.Low,
-          type: FindingType.Info,
-          metadata: {
-            to: mockTetherTransferEvent.args.to,
-            from: mockTetherTransferEvent.args.from,
-          },
-        }),
-      ]);
-      expect(mockTxEvent.filterLog).toHaveBeenCalledTimes(1);
-      expect(mockTxEvent.filterLog).toHaveBeenCalledWith(
-        ERC20_TRANSFER_EVENT,
-        TETHER_ADDRESS
-      );
-    });
+    expect(findings.length).toEqual(0);
+    expect(findings).toStrictEqual([]);
+  });
+
+  it("returns a finding if there is a valid event from the correct address", async () => {
+    MakeMockCall(
+      mockProvider,
+      "getAssetInfoByAddress",
+      [WETH],
+      [assetInfoETH],
+      COMP_CONTRACT,
+      interface_info
+    );
+
+    const txEvent = new TestTransactionEvent()
+      .addEventLog(BUY_COLLATERAL_EVENT, COMP_CONTRACT, [
+        buyCollParamsETH.buyer,
+        buyCollParamsETH.asset,
+        buyCollParamsETH.baseAmount,
+        buyCollParamsETH.collateralAmount,
+      ])
+      .setBlock(10);
+    const findings = await handleTransaction(txEvent);
+
+    const expectFind = createNewCollateralBuyFinding(
+      buyCollParamsETHFormatted.asset,
+      buyCollParamsETHFormatted.collateralAmount,
+      buyCollParamsETHFormatted.baseAmount,
+      buyCollParamsETHFormatted.buyer
+    );
+
+    expect(findings.length).toEqual(1);
+    expect(findings).toStrictEqual([expectFind]);
+  });
+
+  it("returns multiple findings if there is a valid event from the correct address", async () => {
+    MakeMockCall(
+      mockProvider,
+      "getAssetInfoByAddress",
+      [WETH],
+      [assetInfoETH],
+      COMP_CONTRACT,
+      interface_info
+    );
+    MakeMockCall(
+      mockProvider,
+      "getAssetInfoByAddress",
+      [WBTC],
+      [assetInfoBTC],
+      COMP_CONTRACT,
+      interface_info
+    );
+
+    const txEvent = new TestTransactionEvent()
+      .addEventLog(BUY_COLLATERAL_EVENT, COMP_CONTRACT, [
+        buyCollParamsETH.buyer,
+        buyCollParamsETH.asset,
+        buyCollParamsETH.baseAmount,
+        buyCollParamsETH.collateralAmount,
+      ])
+      .addEventLog(BUY_COLLATERAL_EVENT, COMP_CONTRACT, [
+        buyCollParamsBTC.buyer,
+        buyCollParamsBTC.asset,
+        buyCollParamsBTC.baseAmount,
+        buyCollParamsBTC.collateralAmount,
+      ])
+      .setBlock(10);
+    const findings = await handleTransaction(txEvent);
+
+    const expectFindOne = createNewCollateralBuyFinding(
+      buyCollParamsETHFormatted.asset,
+      buyCollParamsETHFormatted.collateralAmount,
+      buyCollParamsETHFormatted.baseAmount,
+      buyCollParamsETHFormatted.buyer
+    );
+    const expectFindTwo = createNewCollateralBuyFinding(
+      buyCollParamsBTCFormatted.asset,
+      buyCollParamsBTCFormatted.collateralAmount,
+      buyCollParamsBTCFormatted.baseAmount,
+      buyCollParamsBTCFormatted.buyer
+    );
+
+    expect(findings.length).toEqual(2);
+    expect(findings).toStrictEqual([expectFindOne, expectFindTwo]);
   });
 });

@@ -1,26 +1,30 @@
-# Large Tether Transfer Agent
+# Liquidation buys Compound protocol
 
 ## Description
 
-This agent detects transactions with large Tether transfers
+This agent detects when a user buys collateral from a liquidation in the Compound protocol and the base amount is greater then 10,000 USD. The base amount is what is used to purchase the collateral.
 
 ## Supported Chains
 
 - Ethereum
-- List any other chains this agent can support e.g. BSC
 
 ## Alerts
 
 Describe each of the type of alerts fired by this agent
 
-- FORTA-1
-  - Fired when a transaction contains a Tether transfer over 10,000 USDT
-  - Severity is always set to "low" (mention any conditions where it could be something else)
-  - Type is always set to "info" (mention any conditions where it could be something else)
-  - Mention any other type of metadata fields included with this alert
+- COMP-LIQI
+  - Fired when a user buys collateral from a liquidation in the Compound protocol and the base amount is greater then 10,000 USD
+  - Severity is always set to "Info"
+  - Type is always set to "info"
+  - The metada contains the following information:
+    - assetType: The type of asset the collateral is in
+    - assetPrice: The total amount of collateral
+    - basePrice: The price the collateral was purchased for in USD
+    - buyerAddr: The address of the user who purchased the collateral
 
 ## Test Data
 
 The agent behaviour can be verified with the following transactions:
 
-- 0x3a0f757030beec55c22cbc545dd8a844cbbb2e6019461769e1bc3f3a95d10826 (15,000 USDT)
+- Buy collateral: tx 0x27af97c0cc40beca2170b9ad88f483956ef2a0b6c5cce25755091fb8a2e4c207
+- buy collateral event topic: 0xf891b2a411b0e66a5f0a6ff1368670fefa287a13f541eb633a386a1a9cc7046b

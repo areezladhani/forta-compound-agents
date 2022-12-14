@@ -1,7 +1,7 @@
 {
-  "name": "forta-agent-starter",
+  "name": "comp-prop-bot",
   "version": "0.0.1",
-  "description": "Forta Agent Typescript starter project",
+  "description": "This bot detects when the Compound protocol creates or queues a proposal",
   "chainIds": [
     1
   ],
@@ -24,7 +24,7 @@
     "test": "jest"
   },
   "dependencies": {
-    "forta-agent": "^0.1.15"
+    "forta-agent": "^0.1.13"
   },
   "devDependencies": {
     "@types/jest": "^27.0.1",
@@ -32,6 +32,7 @@
     "jest": "^27.0.6",
     "nodemon": "^2.0.8",
     "ts-jest": "^27.0.3",
-    "typescript": "^4.3.4"
+    "typescript": "^4.3.4",
+    "forta-agent-tools": "^3.1.2"
   }
 }
